@@ -1,5 +1,7 @@
 """
 程序备份时所用内存与算hash时单次读的块大小有关，与线程最大数有关
+经过考虑还是选择尽可能的还原要备份的文件的真实面目，是软连接就是软连接，有什么属性就是什么属性，
+哪怕要拷贝的最外层文件夹是软连接，也会只当作软连接拷贝
 """
 import os
 import json
@@ -51,14 +53,23 @@ def copy_symlink(src, dst):
     os.symlink(os.readlink(src), dst)
 
 
+def get_type(src):
+    try:
+        st = os.lstat(src)
+    except (OSError, AttributeError):
+        return ' '
+    return os.st.filemode(st.st_mode)[0]
+
+
 def _create_file_md5(src, dst, _new_md5_list, _all_md5_list, _max_thread_num):
+    src_file_type = get_type(src)
     # print("\rcp:{}".format(src), end='', flush=True)
     # 判断文件名是否为软连接
-    if os.path.islink(src):
+    if src_file_type == 'l':
         # 如果是，再建一个软连接
         copy_symlink(src, dst)
         # os.symlink(os.readlink(source_file_path), target_file_path)
-    else:
+    elif src_file_type == '-':
         # 不是,就正常的算md5
         file_md5 = get_hash(src)
         if file_md5 not in _all_md5_list:
@@ -71,9 +82,10 @@ def _create_file_md5(src, dst, _new_md5_list, _all_md5_list, _max_thread_num):
 
 
 def _create_file_md5pp(src, dst, _last_dst, _new_md5_list, _all_md5_list, _max_thread_num):
+    src_file_type = get_type(src)
     # print("\rcp:{}".format(src), end='', flush=True)
     # 判断文件名是否为软连接
-    if os.path.islink(src):
+    if src_file_type == 'l':
         # 如果是，再建一个软连接
         copy_symlink(src, dst)
         # os.symlink(os.readlink(source_file_path), target_file_path)
@@ -85,7 +97,7 @@ def _create_file_md5pp(src, dst, _last_dst, _new_md5_list, _all_md5_list, _max_t
     # out: NameError: name 'd' is not defined
     elif os.path.exists(_last_dst) and filecmp.cmp(src, _last_dst):
         os.link(_last_dst, dst)
-    else:
+    elif src_file_type == '-':
         # 不是,就正常的算md5
         file_md5 = get_hash(src)
         if file_md5 not in _all_md5_list:
@@ -145,10 +157,17 @@ def backup_core(src: str, dst: str, max_thread_num=256):
 
     if last_target_path is None:
         for item in walk:
+            if get_type(item[0]) == 'l':
+                copy_symlink(item[0], target_path + item[0][len(source_path):])
+                continue
             for folder in item[1]:
+                source_folder_path = item[0] + '/' + folder
                 target_folder_path = target_path + item[0][len(source_path):] + '/' + folder
-                if not os.path.exists(target_folder_path):
+                if get_type(source_folder_path) == 'l':
+                    copy_symlink(source_folder_path, target_folder_path)
+                elif not os.path.exists(target_folder_path):
                     os.makedirs(target_folder_path)
+                    os.chmod(target_folder_path, os.stat(source_folder_path).st_mode)
 
             for file in item[2]:
                 # 得到原文件绝对路径
@@ -165,10 +184,17 @@ def backup_core(src: str, dst: str, max_thread_num=256):
 
     else:
         for item in walk:
+            if get_type(item[0]) == 'l':
+                copy_symlink(item[0], target_path + item[0][len(source_path):])
+                continue
             for folder in item[1]:
+                source_folder_path = item[0] + '/' + folder
                 target_folder_path = target_path + item[0][len(source_path):] + '/' + folder
-                if not os.path.exists(target_folder_path):
+                if get_type(source_folder_path) == 'l':
+                    copy_symlink(source_folder_path, target_folder_path)
+                elif not os.path.exists(target_folder_path):
                     os.makedirs(target_folder_path)
+                    os.chmod(target_folder_path, os.stat(source_folder_path).st_mode)
 
             for file in item[2]:
                 # 得到原文件绝对路径
@@ -193,4 +219,4 @@ def backup_core(src: str, dst: str, max_thread_num=256):
 
 
 if __name__ == '__main__':
-    backup_core('~/anaconda3', '/media/mianyan/linux_backup/anaconda3')
+    backup_core('/var', '/media/mianyan/linux_backup/var')
