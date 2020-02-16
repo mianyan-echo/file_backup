@@ -147,69 +147,57 @@ def backup_core(src: str, dst: str, max_thread_num=256):
     os.makedirs(target_path)
     os.chdir(target_path)
 
+    # 预定义保存要备份的文件的字典
+    backup_files_dict = {}
+    walk = os.walk(source_path)
+    for item in walk:
+        if get_type(item[0]) == 'l':
+            copy_symlink(item[0], target_path + item[0][len(source_path):])
+            continue
+        for folder in item[1]:
+            source_folder_path = item[0] + '/' + folder
+            target_folder_path = target_path + item[0][len(source_path):] + '/' + folder
+            if get_type(source_folder_path) == 'l':
+                copy_symlink(source_folder_path, target_folder_path)
+            elif not os.path.exists(target_folder_path):
+                os.makedirs(target_folder_path)
+                os.chmod(target_folder_path, os.stat(source_folder_path).st_mode)
+
+        for file in item[2]:
+            # 得到原文件绝对路径
+            source_file_path = item[0] + '/' + file
+            # 得到目的文件绝对路径
+            target_file_path = target_path + item[0][len(source_path):] + '/' + file
+            backup_files_dict.update({source_file_path: target_file_path})
+
     # 得到全部最新的md5码
     all_md5_list = {}
     for dir_key in final_md5_list:
         all_md5_list.update(final_md5_list[dir_key])
 
     new_md5_list = {}
-    walk = os.walk(source_path)
 
+    # 将有差异的备份独立出来，先分析晚要备份的文件，再根据情况备份
     if last_target_path is None:
-        for item in walk:
-            if get_type(item[0]) == 'l':
-                copy_symlink(item[0], target_path + item[0][len(source_path):])
-                continue
-            for folder in item[1]:
-                source_folder_path = item[0] + '/' + folder
-                target_folder_path = target_path + item[0][len(source_path):] + '/' + folder
-                if get_type(source_folder_path) == 'l':
-                    copy_symlink(source_folder_path, target_folder_path)
-                elif not os.path.exists(target_folder_path):
-                    os.makedirs(target_folder_path)
-                    os.chmod(target_folder_path, os.stat(source_folder_path).st_mode)
-
-            for file in item[2]:
-                # 得到原文件绝对路径
-                source_file_path = item[0] + '/' + file
-                # 得到目的文件绝对路径
-                target_file_path = target_path + item[0][len(source_path):] + '/' + file
-
-                max_thread_num.acquire()
-                Thread(target=_create_file_md5, args=[source_file_path,
-                                                      target_file_path,
-                                                      new_md5_list,
-                                                      all_md5_list,
-                                                      max_thread_num]).start()
-
+        for source_file_path in backup_files_dict:
+            max_thread_num.acquire()
+            Thread(target=_create_file_md5, args=[source_file_path,
+                                                  backup_files_dict[source_file_path],
+                                                  new_md5_list,
+                                                  all_md5_list,
+                                                  max_thread_num]).start()
     else:
-        for item in walk:
-            if get_type(item[0]) == 'l':
-                copy_symlink(item[0], target_path + item[0][len(source_path):])
-                continue
-            for folder in item[1]:
-                source_folder_path = item[0] + '/' + folder
-                target_folder_path = target_path + item[0][len(source_path):] + '/' + folder
-                if get_type(source_folder_path) == 'l':
-                    copy_symlink(source_folder_path, target_folder_path)
-                elif not os.path.exists(target_folder_path):
-                    os.makedirs(target_folder_path)
-                    os.chmod(target_folder_path, os.stat(source_folder_path).st_mode)
+        for source_file_path in backup_files_dict:
+            target_file_path = backup_files_dict[source_file_path]
+            last_target_file_path = last_target_path + target_file_path[len(target_path):]
 
-            for file in item[2]:
-                # 得到原文件绝对路径
-                source_file_path = item[0] + '/' + file
-                # 得到目的文件绝对路径
-                target_file_path = target_path + item[0][len(source_path):] + '/' + file
-                last_target_file_path = last_target_path + item[0][len(source_path):] + '/' + file
-
-                max_thread_num.acquire()
-                Thread(target=_create_file_md5pp, args=[source_file_path,
-                                                        target_file_path,
-                                                        last_target_file_path,
-                                                        new_md5_list,
-                                                        all_md5_list,
-                                                        max_thread_num]).start()
+            max_thread_num.acquire()
+            Thread(target=_create_file_md5pp, args=[source_file_path,
+                                                    target_file_path,
+                                                    last_target_file_path,
+                                                    new_md5_list,
+                                                    all_md5_list,
+                                                    max_thread_num]).start()
 
     final_md5_list.update({time_tag: new_md5_list})
     md5_list_str = json.dumps(final_md5_list, sort_keys=True, indent=4)
